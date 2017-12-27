@@ -1,6 +1,8 @@
 var fs = require('fs')
 var _ = require('underscore')
 var Q = require('q')
+var cheerio = require('cheerio');
+var str = require('string-to-stream');
 
 var svgicons2svgfont = require('svgicons2svgfont')
 var svg2ttf = require('svg2ttf')
@@ -41,20 +43,40 @@ var generators = {
 					done(null, font.toString())
 				})
 
-			_.each(options.files, function(file, idx) {
-				var glyph = fs.createReadStream(file)
-				var name = options.names[idx]
-				var unicode = String.fromCharCode(options.codepoints[name])
-                var ligature = ''
-                for(var i=0;i<name.length;i++) {
-                    ligature+=String.fromCharCode(name.charCodeAt(i))
+            _.each(options.files, function (file, idx) {
+                var fileContent = fs.readFileSync(file, 'utf8');
+                var $ = cheerio.load(fileContent);
+                var icons = $('g[id]');
+                if (icons.length === 0) {
+                    icons = [{
+                        name: options.names[idx],
+                        svg: fileContent
+                    }];
                 }
-				glyph.metadata = {
-					name: name,
-					unicode: [unicode,ligature]
-				}
-				fontStream.write(glyph)
-			})
+                else {
+                    icons = icons.toArray().map(function (icon) {
+                        $icon = $(icon);
+                        return {
+                            name: $icon.attr('id'),
+                            svg: $.html($('svg:first-of-type').clone().html($icon.html())[0])
+                        };
+                    });
+                }
+                _.each(icons, function (icon) {
+                    var glyph = str(icon.svg);
+                    var name = icon.name;
+                    var unicode = String.fromCharCode(options.codepoints[name]);
+                    var ligature = '';
+                    for (var i = 0; i < name.length; i++) {
+                        ligature += String.fromCharCode(name.charCodeAt(i))
+                    }
+                    glyph.metadata = {
+                        name: name,
+                        unicode: [unicode, ligature]
+                    };
+                    fontStream.write(glyph)
+                });
+            });
 
 			fontStream.end()
 		}
